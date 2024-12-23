@@ -250,6 +250,7 @@ class FasterWhisperPipeline(Pipeline):
                     self.model.model.is_multilingual,
                     task=task,
                     language=language,
+                    multilangual=multilangual
                 )
 
         if self.suppress_numerals:
