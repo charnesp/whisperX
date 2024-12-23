@@ -396,6 +396,7 @@ def load_model(
         "max_new_tokens": None,
         "clip_timestamps": None,
         "hallucination_silence_threshold": None,
+        "multilingual": False,
         "hotwords": None,
     }
 
