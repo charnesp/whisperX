@@ -207,7 +207,6 @@ class FasterWhisperPipeline(Pipeline):
         chunk_size=30,
         print_progress=False,
         combined_progress=False,
-        multilingual=False,
     ) -> TranscriptionResult:
         if isinstance(audio, str):
             audio = load_audio(audio)
@@ -239,7 +238,6 @@ class FasterWhisperPipeline(Pipeline):
                 self.model.model.is_multilingual,
                 task=task,
                 language=language,
-                multilingual=multilingual
             )
         else:
             language = language or self.tokenizer.language_code
@@ -249,8 +247,7 @@ class FasterWhisperPipeline(Pipeline):
                     self.model.hf_tokenizer,
                     self.model.model.is_multilingual,
                     task=task,
-                    language=language,
-                    multilingual=multilingual
+                    language=language
                 )
 
         if self.suppress_numerals:
