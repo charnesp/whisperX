@@ -56,6 +56,7 @@ def cli():
     parser.add_argument("--diarize", action="store_true", help="Apply diarization to assign speaker labels to each segment/word")
     parser.add_argument("--min_speakers", default=None, type=int, help="Minimum number of speakers to in audio file")
     parser.add_argument("--max_speakers", default=None, type=int, help="Maximum number of speakers to in audio file")
+    parser.add_argument("--return_embeddings",  action="store_true", help="Return speaker embeddings in the output json file")
 
     parser.add_argument("--temperature", type=float, default=0, help="temperature to use for sampling")
     parser.add_argument("--best_of", type=optional_int, default=5, help="number of candidates when sampling with non-zero temperature")
@@ -122,6 +123,7 @@ def cli():
     diarize: bool = args.pop("diarize")
     min_speakers: int = args.pop("min_speakers")
     max_speakers: int = args.pop("max_speakers")
+    return_embeddings: bool = args.pop("return_embeddings")
     print_progress: bool = args.pop("print_progress")
 
     if args["language"] is not None:
@@ -138,7 +140,9 @@ def cli():
                 f"{model_name} is an English-only model but received '{args['language']}'; using English instead."
             )
         args["language"] = "en"
-    align_language = args["language"] if args["language"] is not None else "en" # default to loading english if not specified
+    align_language = (
+        args["language"] if args["language"] is not None else "en"
+    )  # default to loading english if not specified
 
     temperature = args.pop("temperature")
     if (increment := args.pop("temperature_increment_on_fallback")) is not None:
@@ -174,12 +178,29 @@ def cli():
     if args["max_line_count"] and not args["max_line_width"]:
         warnings.warn("--max_line_count has no effect without --max_line_width")
     writer_args = {arg: args.pop(arg) for arg in word_options}
-    
+
     # Part 1: VAD & ASR Loop
     results = []
     tmp_results = []
     # model = load_model(model_name, device=device, download_root=model_dir)
-    model = load_model(model_name, device=device, device_index=device_index, download_root=model_dir, compute_type=compute_type, language=args['language'], asr_options=asr_options, vad_method=vad_method, vad_options={"chunk_size":chunk_size, "vad_onset": vad_onset, "vad_offset": vad_offset}, task=task, local_files_only=model_cache_only, threads=faster_whisper_threads)
+    model = load_model(
+        model_name,
+        device=device,
+        device_index=device_index,
+        download_root=model_dir,
+        compute_type=compute_type,
+        language=args["language"],
+        asr_options=asr_options,
+        vad_method=vad_method,
+        vad_options={
+            "chunk_size": chunk_size,
+            "vad_onset": vad_onset,
+            "vad_offset": vad_offset,
+        },
+        task=task,
+        local_files_only=model_cache_only,
+        threads=faster_whisper_threads,
+    )
 
     for audio_path in args.pop("audio"):
         audio = load_audio(audio_path)
@@ -203,7 +224,9 @@ def cli():
     if not no_align:
         tmp_results = results
         results = []
-        align_model, align_metadata = load_align_model(align_language, device, model_name=align_model)
+        align_model, align_metadata = load_align_model(
+            align_language, device, model_name=align_model
+        )
         for result, audio_path in tmp_results:
             # >> Align
             if len(tmp_results) > 1:
@@ -215,8 +238,12 @@ def cli():
             if align_model is not None and len(result["segments"]) > 0:
                 if result.get("language", "en") != align_metadata["language"]:
                     # load new language
-                    print(f"New language found ({result['language']})! Previous was ({align_metadata['language']}), loading new alignment model for new language...")
-                    align_model, align_metadata = load_align_model(result["language"], device)
+                    print(
+                        f"New language found ({result['language']})! Previous was ({align_metadata['language']}), loading new alignment model for new language..."
+                    )
+                    align_model, align_metadata = load_align_model(
+                        result["language"], device
+                    )
                 print(">>Performing alignment...")
                 result: AlignedTranscriptionResult = align(
                     result["segments"],
@@ -239,19 +266,37 @@ def cli():
     # >> Diarize
     if diarize:
         if hf_token is None:
-            print("Warning, no --hf_token used, needs to be saved in environment variable, otherwise will throw error loading diarization model...")
+            print(
+                "Warning, no --hf_token used, needs to be saved in environment variable, otherwise will throw error loading diarization model..."
+            )
         tmp_results = results
         print(">>Performing diarization...")
         results = []
         diarize_model = DiarizationPipeline(use_auth_token=hf_token, device=device)
         for result, input_audio_path in tmp_results:
-            diarize_segments = diarize_model(input_audio_path, min_speakers=min_speakers, max_speakers=max_speakers)
+            if return_embeddings:
+                diarize_segments, embeddings = diarize_model(
+                    input_audio_path,
+                    min_speakers=min_speakers,
+                    max_speakers=max_speakers,
+                    return_embeddings=True,
+                )
+            else:
+                diarize_segments = diarize_model(
+                    input_audio_path,
+                    min_speakers=min_speakers,
+                    max_speakers=max_speakers,
+                    return_embeddings=False,
+                )
             result = assign_word_speakers(diarize_segments, result)
             results.append((result, input_audio_path))
+        if return_embeddings:
+            result["embeddings"] = embeddings.tolist()
     # >> Write
     for result, audio_path in results:
         result["language"] = align_language
         writer(result, audio_path, writer_args)
+
 
 if __name__ == "__main__":
     cli()
